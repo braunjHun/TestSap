@@ -1,0 +1,427 @@
+*&---------------------------------------------------------------------*
+*& Report  ZU_TEST_JBRAUN2_BEL
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+REPORT zu_test_jbraun2_bel.
+
+DATA: i_suppressed TYPE TABLE OF zumfeedback WITH HEADER LINE.
+
+TYPES: BEGIN OF ty_bel_entry,
+         zzux_len      LIKE zuxbelhdr-zzux_len,
+         zzux_flextype LIKE zuxbelhdr-zzux_flextype,
+*        zzux_flexkey   LIKE zuxbelhdr-zzux_flexkey,
+*        zzux_eventcode LIKE zuxbelhdr-zzux_eventcode,
+*        zzux_date      LIKE zuxbelhdr-zzux_date,
+*        zzux_time      LIKE zuxbelhdr-zzux_time,
+*        zzux_item      like zuxbelpos-zzux_item,
+         zzux_fq       LIKE zuxbelpos-zzux_fq.
+TYPES: END OF ty_bel_entry.
+
+TYPES: BEGIN OF ty_bel_entry3,
+         zzux_len       LIKE zuxbelhdr-zzux_len,
+         zzux_flextype  LIKE zuxbelhdr-zzux_flextype,
+         zzux_flexkey   LIKE zuxbelhdr-zzux_flexkey,
+         zzux_eventcode LIKE zuxbelhdr-zzux_eventcode,
+         zzux_date      LIKE zuxbelhdr-zzux_date,
+         zzux_time      LIKE zuxbelhdr-zzux_time,
+         zzux_item      LIKE zuxbelpos-zzux_item,
+         zzux_fq        LIKE zuxbelpos-zzux_fq.
+TYPES: END OF ty_bel_entry3.
+
+
+PARAMETERS: p_obj LIKE zumfeedback-zzum_object DEFAULT '7800009376',
+            p_msg LIKE zumfeedback-zzum_message DEFAULT 'P05'.
+
+PARAMETERS: rb_old  RADIOBUTTON GROUP rb1 DEFAULT 'X',
+            rb_rh   RADIOBUTTON GROUP rb1,
+            rb_new  RADIOBUTTON GROUP rb1,
+            rb_new2 RADIOBUTTON GROUP rb1,
+            rb_new3 RADIOBUTTON GROUP rb1.
+
+
+START-OF-SELECTION.
+
+  SELECT * FROM zumfeedback INTO TABLE i_suppressed
+    WHERE zzum_object = p_obj
+     AND zzum_message = p_msg.
+*  WHERE zzum_date >= '20201001'
+*    AND zzum_idoc_nr <> ''.
+
+END-OF-SELECTION.
+
+  IF NOT i_suppressed[] IS INITIAL.
+*----------------------------------------------------------------------
+* Suppressed entries require a table update as well - the send indicator
+* will be set, but no time/date will be filled in.
+    DATA: ls_zuxbelhdr       TYPE zuxbelhdr,
+          lt_zuxbelhdr       TYPE SORTED TABLE OF zuxbelhdr WITH UNIQUE KEY zzux_len,
+          lt_suppressed      TYPE TABLE OF zumfeedback,
+          ls_suppressed      TYPE zumfeedback,
+          ls_suppressed_last TYPE zumfeedback,
+          lt_suppr_same      TYPE TABLE OF zumfeedback,
+          li_bel_item        TYPE TABLE OF zux_bel_item,
+          lwa_bel_item       LIKE LINE OF li_bel_item,
+          lv_tabix           TYPE i.
+
+    DATA: lt_zuxbel TYPE TABLE OF ty_bel_entry,
+          ls_zuxbel TYPE ty_bel_entry.
+
+    DATA: lt_zuxbel3 TYPE TABLE OF ty_bel_entry3,
+          ls_zuxbel3 TYPE ty_bel_entry3.
+
+
+    IF rb_new3 IS INITIAL.
+
+      LOOP AT i_suppressed.
+        ULINE.
+        WRITE: /
+        'Object:',i_suppressed-zzum_object, 'MSG:',i_suppressed-zzum_message, 'DATE:',i_suppressed-zzum_date
+        ,'Time:',i_suppressed-zzum_time, 'Item:',i_suppressed-zzum_item.
+
+        i_suppressed-zzum_sentind = 'X'.
+        MODIFY i_suppressed.
+        CASE 'X'.
+          WHEN rb_old.
+
+***BEG*** OLD LOGIC
+******-----------------------------------------------------------------------
+****** Populate Bel entry   - bussiness event status relief
+******        DATA: ls_zuxbelhdr TYPE zuxbelhdr,
+******              li_bel_item  TYPE TABLE OF zux_bel_item,
+******              lwa_bel_item LIKE LINE OF li_bel_item.
+
+            CLEAR: ls_zuxbelhdr, lwa_bel_item.
+            SELECT * FROM zuxbelhdr AS a
+               INTO ls_zuxbelhdr
+             WHERE a~zzux_flexkey   EQ i_suppressed-zzum_object
+               AND a~zzux_eventcode EQ i_suppressed-zzum_message
+               AND a~zzux_date      EQ i_suppressed-zzum_date
+               AND a~zzux_time      EQ i_suppressed-zzum_time.
+              SELECT SINGLE zzux_len FROM zuxbelpos
+                INTO ls_zuxbelhdr-zzux_len
+                  WHERE zzux_len EQ ls_zuxbelhdr-zzux_len
+                    AND zzux_fq LIKE '%:SP'.
+              CHECK sy-subrc NE 0.
+              lwa_bel_item-zzux_fq = 'SP'.
+              EXIT.
+            ENDSELECT.
+***END*** OLD LOGIC
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+          WHEN rb_rh.
+***BEG*** RH LOGIC
+*-----------------------------------------------------------------------
+* Populate Bel entry   - bussiness event status relief
+
+            CLEAR: ls_zuxbelhdr,
+                   lwa_bel_item,
+                   lt_suppressed,
+                   ls_suppressed,
+                   lv_tabix.
+
+*       internal table to work within loop and collect data
+            MOVE i_suppressed[] TO lt_suppressed.
+
+            IF ls_suppressed_last IS NOT INITIAL "already ran once at least
+*          all the below fields in suppressed itab must equal in order
+*          in order to continue with lastly selected items from zuxbelhdr
+*          in lt_zuxbelhdr, otherwise select it again
+
+              AND ls_suppressed_last-zzum_object  = i_suppressed-zzum_object
+              AND ls_suppressed_last-zzum_message = i_suppressed-zzum_message
+              AND ls_suppressed_last-zzum_date    = i_suppressed-zzum_date
+              AND ls_suppressed_last-zzum_time    = i_suppressed-zzum_time.
+              "do not query zuxbelhdr as it is in internal table lt_zuxbelhdr already
+            ELSE.
+              CLEAR: lt_zuxbelhdr, lt_suppr_same.
+              SELECT * FROM zuxbelhdr AS a
+                INTO TABLE lt_zuxbelhdr
+                WHERE a~zzux_flexkey   EQ i_suppressed-zzum_object
+                  AND a~zzux_eventcode EQ i_suppressed-zzum_message
+                  AND a~zzux_date      EQ i_suppressed-zzum_date
+                  AND a~zzux_time      EQ i_suppressed-zzum_time.
+
+              LOOP AT lt_suppressed INTO ls_suppressed "use structure to
+                    WHERE   zzum_object = i_suppressed-zzum_object
+                      AND   zzum_message = i_suppressed-zzum_message
+                      AND   zzum_date    = i_suppressed-zzum_date
+                      AND   zzum_time    = i_suppressed-zzum_time
+                .
+                APPEND ls_suppressed TO lt_suppr_same.
+              ENDLOOP.
+              "to make sure proper item number sequence ascending
+              SORT lt_suppr_same BY zzum_item.
+            ENDIF.
+*        anyhow always overwrite last entry as new entry must have
+*        some diff. fields such as zzum_item even if above no query
+*        was needed from zuxbelhdr
+            CLEAR ls_suppressed_last.
+            MOVE i_suppressed TO ls_suppressed_last.
+
+            READ TABLE lt_suppr_same
+                  WITH KEY zzum_object = i_suppressed-zzum_object
+                           zzum_message = i_suppressed-zzum_message
+                           zzum_date    = i_suppressed-zzum_date
+                           zzum_time    = i_suppressed-zzum_time
+                           zzum_item    = i_suppressed-zzum_item
+                           TRANSPORTING NO FIELDS.
+            IF sy-subrc = 0.
+              lv_tabix = sy-tabix.
+            ELSE.
+*        unexpected error occured, try to get the first item
+*        anyhow it was getting the first item previously
+              lv_tabix = 1.
+            ENDIF.
+            READ TABLE lt_zuxbelhdr INDEX lv_tabix INTO ls_zuxbelhdr.
+            SELECT SINGLE zzux_len FROM zuxbelpos
+              INTO ls_zuxbelhdr-zzux_len
+                WHERE zzux_len EQ ls_zuxbelhdr-zzux_len
+                  AND zzux_fq  LIKE '%SP'.
+            IF sy-subrc <> 0.
+              lwa_bel_item-zzux_fq = 'SP'.
+            ENDIF.
+***END*** RH LOGIC
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+          WHEN rb_new.
+***BEG*** NEW LOGIC
+            CLEAR: ls_zuxbelhdr, lwa_bel_item, ls_zuxbel.
+            IF i_suppressed-zzum_item IS NOT INITIAL.
+              SELECT SINGLE h~zzux_len h~zzux_flextype p~zzux_fq
+                FROM zuxbelhdr AS h
+                JOIN zuxbelpos AS p
+                   ON p~zzux_len = h~zzux_len
+                 INTO ls_zuxbel
+               WHERE h~zzux_flexkey   EQ i_suppressed-zzum_object
+                 AND h~zzux_eventcode EQ i_suppressed-zzum_message
+                 AND h~zzux_date      EQ i_suppressed-zzum_date
+                 AND h~zzux_time      EQ i_suppressed-zzum_time
+                 AND p~zzux_item      EQ i_suppressed-zzum_item.
+            ELSE.
+              SELECT SINGLE h~zzux_len h~zzux_flextype "zzux_fq is empty
+               FROM zuxbelhdr AS h
+                INTO ls_zuxbel
+              WHERE h~zzux_flexkey   EQ i_suppressed-zzum_object
+                AND h~zzux_eventcode EQ i_suppressed-zzum_message
+                AND h~zzux_date      EQ i_suppressed-zzum_date
+                AND h~zzux_time      EQ i_suppressed-zzum_time.
+            ENDIF.
+            IF sy-subrc = 0.
+              IF ls_zuxbel-zzux_fq = 'SP'.
+                CONTINUE.
+              ELSE.
+                lwa_bel_item-zzux_fq   = 'SP'.
+              ENDIF.
+            ELSE.
+              CONTINUE.
+            ENDIF.
+            ls_zuxbelhdr-zzux_flextype = ls_zuxbel-zzux_flextype.
+            ls_zuxbelhdr-zzux_flexkey = i_suppressed-zzum_object.
+            ls_zuxbelhdr-zzux_eventcode = i_suppressed-zzum_item.
+            ls_zuxbelhdr-zzux_len = ls_zuxbel-zzux_len.
+            lwa_bel_item-zzux_item = i_suppressed-zzum_item.
+***END*** NEW LOGIC
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+          WHEN rb_new2.
+***BEG*** NEW 2 LOGIC
+            CLEAR: ls_zuxbelhdr, lwa_bel_item, ls_zuxbel.
+            REFRESH: lt_zuxbel.
+            SELECT h~zzux_len h~zzux_flextype p~zzux_fq
+              FROM zuxbelhdr AS h
+              JOIN zuxbelpos AS p
+                 ON p~zzux_len = h~zzux_len
+               INTO TABLE lt_zuxbel
+             WHERE h~zzux_flexkey   EQ i_suppressed-zzum_object
+               AND h~zzux_eventcode EQ i_suppressed-zzum_message
+               AND h~zzux_date      EQ i_suppressed-zzum_date
+               AND h~zzux_time      EQ i_suppressed-zzum_time
+               AND p~zzux_item      EQ i_suppressed-zzum_item.
+            IF sy-subrc = 0.
+              READ TABLE lt_zuxbel WITH KEY zzux_fq = 'SP' TRANSPORTING NO FIELDS.
+              IF sy-subrc = 0.
+                CONTINUE.
+              ENDIF.
+              READ TABLE lt_zuxbel INTO ls_zuxbel INDEX 1.
+              IF sy-subrc = 0.
+                ls_zuxbelhdr-zzux_flextype  = ls_zuxbel-zzux_flextype.
+                ls_zuxbelhdr-zzux_flexkey   = i_suppressed-zzum_object.
+                ls_zuxbelhdr-zzux_eventcode = i_suppressed-zzum_item.
+                ls_zuxbelhdr-zzux_len       = ls_zuxbel-zzux_len.
+                lwa_bel_item-zzux_fq        = 'SP'.
+              ENDIF.
+            ELSE.
+              SELECT SINGLE * FROM zuxbelhdr AS a
+                INTO ls_zuxbelhdr
+              WHERE a~zzux_flexkey   EQ i_suppressed-zzum_object
+                AND a~zzux_eventcode EQ i_suppressed-zzum_message
+                AND a~zzux_date      EQ i_suppressed-zzum_date
+                AND a~zzux_time      EQ i_suppressed-zzum_time.
+              IF sy-subrc = 0.
+                lwa_bel_item-zzux_fq = 'SP'.
+              ENDIF.
+            ENDIF.
+
+***END*** NEW 2 LOGIC
+          WHEN OTHERS.
+        ENDCASE.
+
+        IF NOT lwa_bel_item-zzux_fq IS INITIAL.
+          CLEAR li_bel_item[].
+          lwa_bel_item-zzux_item = i_suppressed-zzum_item.
+          APPEND lwa_bel_item TO li_bel_item.
+* Log record
+*          CALL FUNCTION 'Z_UX_LOG_BUSINESS_EVENT'
+*            EXPORTING
+*              flextype              = ls_zuxbelhdr-zzux_flextype
+*              flexkey               = ls_zuxbelhdr-zzux_flexkey
+*              eventcode             = ls_zuxbelhdr-zzux_eventcode
+*            TABLES
+*              bel_item              = li_bel_item
+*            CHANGING
+*              len                   = ls_zuxbelhdr-zzux_len
+*            EXCEPTIONS
+*              config_zux_flextype   = 1
+*              config_zux_eventcode  = 2
+*              config_zux_fq         = 3
+*              number_range          = 4
+*              zuxbelhdr_lock_failed = 5
+*              not_active            = 6
+*              OTHERS                = 7.
+          WRITE: / 'BEL: flextype:', ls_zuxbelhdr-zzux_flextype,
+                     'flexkey:',ls_zuxbelhdr-zzux_flexkey,
+                     'eventcode:',ls_zuxbelhdr-zzux_eventcode,
+                     'LEN:',ls_zuxbelhdr-zzux_len,
+                     'ITEM:',lwa_bel_item-zzux_item,
+                     'FQ:',lwa_bel_item-zzux_fq.
+          IF sy-subrc <> 0.
+* No action
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+* ----------------------------------------------------------------------
+    ELSE.
+***BEG*** NEW 3 LOGIC
+      REFRESH: lt_zuxbel3.
+      LOOP AT i_suppressed.
+        CLEAR: ls_zuxbelhdr, ls_zuxbel3.
+        REFRESH: lt_zuxbel.
+*       ----------------------------------------------------------------
+*       Read ZUXBELHDR and ZUXBELPO tables to determine the BEL entries
+*       to the current ZUMFEEDBACK supression record
+        SELECT h~zzux_len h~zzux_flextype p~zzux_fq
+          FROM zuxbelhdr AS h
+          JOIN zuxbelpos AS p
+             ON p~zzux_len = h~zzux_len
+           INTO TABLE lt_zuxbel
+         WHERE h~zzux_flexkey   EQ i_suppressed-zzum_object
+           AND h~zzux_eventcode EQ i_suppressed-zzum_message
+           AND h~zzux_date      EQ i_suppressed-zzum_date
+           AND h~zzux_time      EQ i_suppressed-zzum_time
+           AND p~zzux_item      EQ i_suppressed-zzum_item.
+
+        IF sy-subrc = 0.
+*         --------------------------------------------------------------
+*         Populate the suppression records.
+*         (in some special cases ther are multiple BEL entries to the
+*          same ZUMFEEDBACK log entry)
+          LOOP AT lt_zuxbel INTO ls_zuxbel.
+*           Prevent the process to insert SP record twice to the same
+*           log entry in ZUXBELPOS
+            READ TABLE lt_zuxbel
+              WITH KEY zzux_len = ls_zuxbel-zzux_len
+                       zzux_fq  = 'SP'
+              TRANSPORTING NO FIELDS.
+            IF sy-subrc = 0.
+              CONTINUE.
+            ENDIF.
+            ls_zuxbel3-zzux_flextype  = ls_zuxbel-zzux_flextype.
+            ls_zuxbel3-zzux_flexkey   = i_suppressed-zzum_object.
+            ls_zuxbel3-zzux_eventcode = i_suppressed-zzum_message.
+            ls_zuxbel3-zzux_len       = ls_zuxbel-zzux_len.
+            ls_zuxbel3-zzux_item      = i_suppressed-zzum_item.
+            ls_zuxbel3-zzux_fq        = 'SP'.
+            APPEND ls_zuxbel3 TO lt_zuxbel3.
+          ENDLOOP.
+        ELSE.
+*         --------------------------------------------------------------
+*         In case no ZUXBELPOS record was defined, read only the
+*         ZUXBELHDR table to determine the BEL entries to the current
+*         ZUMFEEDBACK supression record
+          SELECT * FROM zuxbelhdr
+            INTO TABLE lt_zuxbelhdr
+           WHERE zzux_flexkey   EQ i_suppressed-zzum_object
+             AND zzux_eventcode EQ i_suppressed-zzum_message
+             AND zzux_date      EQ i_suppressed-zzum_date
+             AND zzux_time      EQ i_suppressed-zzum_time.
+*         --------------------------------------------------------------
+*         Populate the suppression records.
+*         (in some special cases ther are multiple BEL entries to the
+*          same ZUMFEEDBACK log entry)
+          LOOP AT lt_zuxbelhdr INTO ls_zuxbelhdr.
+            ls_zuxbel3-zzux_flextype  = ls_zuxbelhdr-zzux_flextype.
+            ls_zuxbel3-zzux_flexkey   = ls_zuxbelhdr-zzux_flexkey.
+            ls_zuxbel3-zzux_eventcode = ls_zuxbelhdr-zzux_eventcode.
+            ls_zuxbel3-zzux_len       = ls_zuxbelhdr-zzux_len.
+            ls_zuxbel3-zzux_fq        = 'SP'.
+            APPEND ls_zuxbel3 TO lt_zuxbel3.
+          ENDLOOP.
+        ENDIF.
+      ENDLOOP.
+
+      DELETE ADJACENT DUPLICATES FROM lt_zuxbel3.
+      LOOP AT lt_zuxbel3 INTO ls_zuxbel3
+        WHERE zzux_fq IS NOT INITIAL.
+
+        CLEAR: lwa_bel_item, li_bel_item[].
+        lwa_bel_item-zzux_item = ls_zuxbel3-zzux_item.
+        lwa_bel_item-zzux_fq = ls_zuxbel3-zzux_fq.
+        APPEND lwa_bel_item TO li_bel_item.
+* Log record
+*          CALL FUNCTION 'Z_UX_LOG_BUSINESS_EVENT'
+*            EXPORTING
+*              flextype              = ls_zuxbelhdr-zzux_flextype
+*              flexkey               = ls_zuxbelhdr-zzux_flexkey
+*              eventcode             = ls_zuxbelhdr-zzux_eventcode
+*            TABLES
+*              bel_item              = li_bel_item
+*            CHANGING
+*              len                   = ls_zuxbelhdr-zzux_len
+*            EXCEPTIONS
+*              config_zux_flextype   = 1
+*              config_zux_eventcode  = 2
+*              config_zux_fq         = 3
+*              number_range          = 4
+*              zuxbelhdr_lock_failed = 5
+*              not_active            = 6
+*              OTHERS                = 7.
+        ULINE.
+        WRITE: / 'BEL: flextype:', ls_zuxbel3-zzux_flextype,
+                   'flexkey:',ls_zuxbel3-zzux_flexkey,
+                   'eventcode:',ls_zuxbel3-zzux_eventcode,
+                   'LEN:',ls_zuxbel3-zzux_len,
+                   'ITEM:',ls_zuxbel3-zzux_item,
+                   'FQ:',ls_zuxbel3-zzux_fq.
+        IF sy-subrc <> 0.
+* No action
+        ENDIF.
+      ENDLOOP.
+
+    ENDIF.
+
+
+* This update is protected by a "global" lock object EPROG.
+*----------------------------------------------------------------------
+*      UPDATE zumfeedback FROM TABLE i_suppressed.
+
+    WRITE: / 'Update: zumfeedback Table'.
+*----------------------------------------------------------------------
+  ENDIF.
