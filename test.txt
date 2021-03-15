@@ -1,2 +1,4 @@
 Teszt file
-Második sor
+Ez ide nem kell -> Második sor
+Harmadik sor
+negyedik sor
