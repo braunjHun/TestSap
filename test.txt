@@ -1,4 +1,3 @@
 Teszt file
-Ez ide nem kell -> Második sor
-Harmadik sor
+lehet jobb lenne ha nem lenn ennyi sor
 negyedik sor
